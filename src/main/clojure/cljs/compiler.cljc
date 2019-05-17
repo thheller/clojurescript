@@ -960,10 +960,25 @@
   [{variadic :variadic? :keys [name env methods max-fixed-arity recur-frames loop-lets]}]
   ;;fn statements get erased, serve no purpose and can pollute scope if named
   (when-not (= :statement (:context env))
-    (let [loop-locals (->> (concat (mapcat :params (filter #(and % @(:flag %)) recur-frames))
-                                   (mapcat :params loop-lets))
-                           (map munge)
-                           seq)]
+    (let [recur-params ;; params from recur'ing fns
+          (->> recur-frames
+               (filter #(and % @(:flag %)))
+               (mapcat :params))
+
+          ;; when inside a recur'ing fn need to capture all let bindings
+          ;; when not we only need to capture bindings starting with the first (loop [...])
+          ;; (let [x 1] (loop [y 2] ...)) x will never change so we don't need to capture it
+          ;; this will also correctly remove all loop-lets if none of them were actual loops
+          loop-bindings
+          (cond->> (->> loop-lets (mapcat :params) reverse) ;; reverse since its a cons stack
+            (not (seq recur-params))
+            (drop-while #(= :let (:local %))))
+
+          ;; remaining mutable bindings/locals that need to be captured
+          loop-locals
+          (->> (concat recur-params loop-bindings)
+               (map munge)
+               seq)]
       (when loop-locals
         (when (= :return (:context env))
             (emits "return "))
